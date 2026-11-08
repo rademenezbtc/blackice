@@ -12,7 +12,8 @@ test("batch review shows every address and amount; export preserves signed hex w
   let anchor: any;
   let calls = 0;
   const context: any = {
-    console, Blob, setTimeout: (f: () => void) => f(),
+    location:{hash:"",pathname:"/"}, sessionStorage:{getItem(){return "";}},
+    console, Blob, URLSearchParams, setTimeout: (f: () => void) => f(),
     EventSource: class { addEventListener() {} },
     fetch: () => { calls++; throw new Error("unexpected network call"); },
     URL: { createObjectURL: (b: Blob) => { downloaded = b; return "blob:test"; }, revokeObjectURL() {} },
@@ -22,7 +23,7 @@ test("batch review shows every address and amount; export preserves signed hex w
       body: { appendChild() {}, classList: { toggle() {} } },
     },
   };
-  runInNewContext(script.replace("setupComposer();", "") + `
+  runInNewContext(script.replace("setupComposer();", "").replace("connect();", "") + `
     S = { session: {
       id: "session", recipients: [{address: "tsp1first", amount_sat: 1000}, {address: "tsp1second<test>", amount_sat: 2000}],
       inputs: [{txid: "first", vout: 0}, {txid: "second", vout: 1}],

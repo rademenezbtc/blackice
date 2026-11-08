@@ -179,9 +179,8 @@ async function run() {
     const dash = startDashboard(app, {
       port: Number(flag("port", "8787")),
       actions: {
-        propose: cfg.role === "coordinator" ? async (file) => app.propose(await loadProposal(file)) : undefined,
         review: cfg.role === "coordinator" ? (draft) => reviewPayment(draft) : undefined,
-        proposePayment: cfg.role === "coordinator" ? async (draft) => app.propose((await reviewPayment(draft)).proposal) : undefined,
+        proposeReviewed: cfg.role === "coordinator" ? async (proposal) => app.propose(proposal) : undefined,
         broadcast: async (hex) => {
           const r = await fetch(`${EXPLORER}/tx`, { method: "POST", body: hex });
           const text = (await r.text()).trim();
@@ -193,7 +192,8 @@ async function run() {
     early.forEach(dash.onWire);
     wireSink = dash.onWire;
     log(`dashboard: ${dash.url}`);
-    if (argv.includes("--open") && process.platform === "darwin") Bun.spawn(["open", dash.url]);
+    if (argv.includes("--open") && process.platform === "darwin") Bun.spawn(["open", dash.launchUrl]);
+    else console.log(`Open BlackIce (private local link): ${dash.launchUrl}`);
   }
   await node.start();
   log(`marmot identity ${id.npub} (${cfg.role}, share ${cfg.shareIndex}) on ${cfg.relays.join(", ")}`);

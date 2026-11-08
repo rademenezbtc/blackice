@@ -261,6 +261,12 @@ const ICON = {
   wait: '<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.4" fill="currentColor"/></svg>',
   lock: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
 };
+const fragmentToken = new URLSearchParams(location.hash.slice(1)).get("token");
+if (fragmentToken && /^[0-9a-f]{64}$/.test(fragmentToken)) {
+  sessionStorage.setItem("blackiceToken", fragmentToken);
+  history.replaceState(null, "", location.pathname);
+}
+const launchToken = sessionStorage.getItem("blackiceToken") || "";
 let S = null, wireCount = 0, wireBytes = 0, leaks = 0, lastWire = 0;
 
 const STAGES = [
@@ -397,7 +403,7 @@ function renderControls() {
 
 async function api(name, body = {}) {
   try {
-    const r = await fetch(`/api/${name}`, { method: "POST", headers: { "x-vault": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
+    const r = await fetch(`/api/${name}`, { method: "POST", headers: { "x-vault": "1", "content-type": "application/json", "authorization": `Bearer ${launchToken}` }, body: JSON.stringify(body) });
     const j = await r.json();
     return r.ok ? { ok: true, ...j } : { ok: false, error: j.error };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -457,7 +463,7 @@ function setupComposer() {
     renderSimple();
     if (!result.ok) { $("formError").textContent = result.error; return; }
     if (JSON.stringify(draft) !== JSON.stringify(readDraft())) { $("formError").textContent = "Payment changed during review. Review again."; return; }
-    reviewedDraft = draft;
+    reviewedDraft = { reviewId: result.reviewId };
     const t = result.totals;
     $("reviewPanel").innerHTML = `<h3>Review payment</h3>${draft.recipients.map(r => `<p><b>${sat(r.amount_sat)} sats</b> → ${esc(r.address)}</p>`).join("")}<p>Selected coins: ${sat(t.input_sat)} sats · Fee: ${sat(t.fee_sat)} sats · Change: ${sat(t.change_sat)} sats</p><button type="button" class="btn primary" id="startPayment">Ask signers to approve</button><p class="muted">Nothing is broadcast until you choose Broadcast to Signet.</p>`;
     $("reviewPanel").hidden = false;
@@ -507,13 +513,38 @@ function addLog(l) {
 }
 $("foot").onclick = () => document.body.classList.toggle("showlog");
 
-function connect() {
-  const es = new EventSource("/events");
-  es.addEventListener("snapshot", (e) => { S = JSON.parse(e.data); render(); });
-  es.addEventListener("wire", (e) => addWire(JSON.parse(e.data)));
-  es.addEventListener("log", (e) => addLog(JSON.parse(e.data)));
-  es.addEventListener("hello", () => { $("feed").innerHTML = ""; wireCount = wireBytes = leaks = 0; $("log").textContent = ""; });
-  es.onerror = () => { $("last").textContent = "dashboard disconnected — is `vault run` still running?"; };
+async function connect() {
+  try {
+    const response = await fetch("/events", {headers:{authorization:`Bearer ${launchToken}`}});
+    if (!response.ok) {
+      $("nextAction").textContent = "Access expired. Reopen BlackIce from the launcher or use its private local link.";
+      $("compose").hidden = true;
+      $("controls").hidden = true;
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder(); let pending = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, {stream:true});
+      let boundary;
+      while ((boundary = pending.indexOf("\n\n")) >= 0) {
+        const event = pending.slice(0,boundary); pending = pending.slice(boundary+2);
+        const type = event.split("\n").find(l=>l.startsWith("event: "))?.slice(7);
+        const data = event.split("\n").find(l=>l.startsWith("data: "))?.slice(6);
+        if (!data) continue;
+        const item = JSON.parse(data);
+        if (type === "snapshot") { S = item; render(); }
+        if (type === "wire") addWire(item);
+        if (type === "log") addLog(item);
+        if (type === "hello") { $("feed").innerHTML=""; wireCount=wireBytes=leaks=0; $("log").textContent=""; }
+      }
+    }
+  } catch {}
+  $("nextAction").textContent = "Connection lost. Reconnecting to BlackIce…";
+  $("compose").hidden = true; $("controls").hidden = true;
+  setTimeout(connect, 2000);
 }
 connect();
 </script>

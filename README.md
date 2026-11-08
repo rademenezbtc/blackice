@@ -15,13 +15,17 @@ Built at bitcoin++ Seoul 2026 for *Best Use of the Marmot Protocol*.
 
 ![The BlackIce dashboard after a completed signing ceremony](docs/dashboard-complete.png)
 
+Security scope and remaining mainnet blockers: [SECURITY.md](SECURITY.md).
+
 ## Simple local app (Signet)
 
 Keep Frostsnap for creating/restoring the wallet. Complete the one-time bridge
 import and signer pairing documented below; existing A/B configurations work.
 After setup, close Frostsnap and double-click `scripts/BlackIce.command` on each
 Mac. Enter that Mac's configured signer name (A or B). The launcher starts the
-bridge and coordinator and opens BlackIce in the default browser. Press Ctrl+C
+bridge and coordinator and opens BlackIce with a private per-launch link in the default browser. Bare
+localhost links cannot access wallet state or issue commands. If access expires,
+reopen with the latest launcher/terminal link. Press Ctrl+C
 in its Terminal window to stop it. Bun and the built bridge are prerequisites;
 this is a local web app with a Mac launcher, not a signed native app installer.
 
