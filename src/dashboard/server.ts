@@ -3,10 +3,13 @@
 //   GET  /events   Server-Sent Events: snapshot | wire | log
 //   POST /api/*    propose · sign · cancel · broadcast (header x-vault: 1 required)
 import type { VaultApp } from "../vault-app.ts";
+import type { PaymentDraft } from "../payment.ts";
 import type { WireEvent } from "../tap.ts";
 
 export interface DashboardActions {
   propose?: (file: string) => Promise<unknown>;
+  review?: (draft: PaymentDraft) => Promise<unknown>;
+  proposePayment?: (draft: PaymentDraft) => Promise<unknown>;
   broadcast?: (txHex: string) => Promise<string>;
 }
 
@@ -42,6 +45,7 @@ export function startDashboard(app: VaultApp, opts: { port: number; actions?: Da
     broadcast("wire", item);
   };
 
+  let proposingPayment = false;
   let pending = false;
   app.onChange(() => {
     if (pending) return;
@@ -82,6 +86,16 @@ export function startDashboard(app: VaultApp, opts: { port: number; actions?: Da
         const body: any = await req.json().catch(() => ({}));
         try {
           switch (url.pathname) {
+            case "/api/review":
+              if (!opts.actions?.review) throw new Error("only the coordinator prepares payments");
+              return json(await opts.actions.review(body));
+            case "/api/payment":
+              if (!opts.actions?.proposePayment) throw new Error("only the coordinator proposes payments");
+              if (!app.snapshot().deviceReady || !app.snapshot().canPropose) throw new Error("Connect your device and finish or cancel the current payment first");
+              if (proposingPayment) throw new Error("A payment is already being prepared");
+              proposingPayment = true;
+              try { await opts.actions.proposePayment(body); } finally { proposingPayment = false; }
+              return json({ ok: true });
             case "/api/propose":
               if (!opts.actions?.propose) throw new Error("only the coordinator proposes");
               await opts.actions.propose(String(body.file ?? "proposal.json"));
@@ -111,6 +125,6 @@ export function startDashboard(app: VaultApp, opts: { port: number; actions?: Da
     },
   });
   // keep proxies/browsers from closing idle SSE connections
-  setInterval(() => { for (const c of clients) try { c.enqueue(enc.encode(": ping\n\n")); } catch { clients.delete(c); } }, 15000);
-  return { url: `http://127.0.0.1:${server.port}`, onWire, server };
+  const heartbeat = setInterval(() => { for (const c of clients) try { c.enqueue(enc.encode(": ping\n\n")); } catch { clients.delete(c); } }, 15000);
+  return { url: `http://127.0.0.1:${server.port}`, onWire, server, close() { clearInterval(heartbeat); server.stop(true); } };
 }

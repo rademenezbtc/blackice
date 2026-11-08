@@ -18,6 +18,7 @@ import { VaultApp, type AppConfig } from "./vault-app.ts";
 import { relayNetwork } from "./net-pool.ts";
 import { FileBytesStore } from "./file-store.ts";
 import { tapNetwork, type WireEvent } from "./tap.ts";
+import { reviewPayment, EXPLORER } from "./payment.ts";
 import { startDashboard } from "./dashboard/server.ts";
 
 const DEFAULT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol", "wss://relay.primal.net"];
@@ -179,10 +180,12 @@ async function run() {
       port: Number(flag("port", "8787")),
       actions: {
         propose: cfg.role === "coordinator" ? async (file) => app.propose(await loadProposal(file)) : undefined,
+        review: cfg.role === "coordinator" ? (draft) => reviewPayment(draft) : undefined,
+        proposePayment: cfg.role === "coordinator" ? async (draft) => app.propose((await reviewPayment(draft)).proposal) : undefined,
         broadcast: async (hex) => {
-          const r = await fetch("https://mempool.space/signet/api/tx", { method: "POST", body: hex });
+          const r = await fetch(`${EXPLORER}/tx`, { method: "POST", body: hex });
           const text = (await r.text()).trim();
-          if (!r.ok) throw new Error(`mempool.space refused: ${text}`);
+          if (!r.ok) throw new Error(`Signet explorer refused: ${text}`);
           return text;
         },
       },
@@ -190,6 +193,7 @@ async function run() {
     early.forEach(dash.onWire);
     wireSink = dash.onWire;
     log(`dashboard: ${dash.url}`);
+    if (argv.includes("--open") && process.platform === "darwin") Bun.spawn(["open", dash.url]);
   }
   await node.start();
   log(`marmot identity ${id.npub} (${cfg.role}, share ${cfg.shareIndex}) on ${cfg.relays.join(", ")}`);

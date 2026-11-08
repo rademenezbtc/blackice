@@ -15,6 +15,35 @@ Built at bitcoin++ Seoul 2026 for *Best Use of the Marmot Protocol*.
 
 ![The BlackIce dashboard after a completed signing ceremony](docs/dashboard-complete.png)
 
+## Simple local app (Signet)
+
+Keep Frostsnap for creating/restoring the wallet. Complete the one-time bridge
+import and signer pairing documented below; existing A/B configurations work.
+After setup, close Frostsnap and double-click `scripts/BlackIce.command` on each
+Mac. Enter that Mac's configured signer name (A or B). The launcher starts the
+bridge and coordinator and opens BlackIce in the default browser. Press Ctrl+C
+in its Terminal window to stop it. Bun and the built bridge are prerequisites;
+this is a local web app with a Mac launcher, not a signed native app installer.
+
+The coordinator adds recipients and sats, selects wallet coins, and clicks
+**Review payment**. BlackIce fetches the funding transactions from Blockstream's
+Signet explorer, checks confirmation/unspent status and transaction IDs, and
+calculates change. **Ask signers to approve** starts the ceremony after rechecking
+the coins. Both signers follow the on-screen prompts and approve on their devices.
+After the first round, choose **Continue to device signing**. Finally, explicitly
+broadcast to Signet or export the signed transaction.
+
+No JSON proposal file is needed in this flow. Manual coin selection still needs
+the funding txid, output number, receive/change branch and address index. The
+bridge validates wallet ownership before device approval. Automatic wallet
+scanning, fee-rate estimation, QR pairing and CSV import are not implemented.
+Fees are entered as a total in sats; adjust them for larger batches. Explorer
+checks disclose selected outpoints to that service, not recipient SP addresses
+or private keys. Private signing shares remain on the devices.
+
+Relay events are under **Advanced details**; click the log footer for diagnostics.
+The CLI and file proposals remain available for troubleshooting.
+
 ## The problem
 
 Multisig is the safest way to hold bitcoin, but it gives up privacy at every step:

@@ -22,7 +22,7 @@ test("batch review shows every address and amount; export preserves signed hex w
       body: { appendChild() {}, classList: { toggle() {} } },
     },
   };
-  runInNewContext(script + `
+  runInNewContext(script.replace("setupComposer();", "") + `
     S = { session: {
       id: "session", recipients: [{address: "tsp1first", amount_sat: 1000}, {address: "tsp1second<test>", amount_sat: 2000}],
       inputs: [{txid: "first", vout: 0}, {txid: "second", vout: 1}],

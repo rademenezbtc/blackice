@@ -183,27 +183,58 @@ body.showlog #log { display: block; }
   .step .s { display: none; }
   .chips { display: none; }
 }
+
+body { height:auto; min-height:100vh; display:block; }
+main { display:block; max-width:1080px; margin:auto; }
+.col { overflow:visible; }
+[hidden] { display:none !important; }
+#advancedPanel { margin-top:20px; height:480px; }
+footer { margin-top:20px; }
+.muted, #setup p { color:var(--muted); }
+.formrow { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; align-items:end; }
+.formrow label { flex:1; min-width:130px; color:var(--muted); font-size:13px; }
+.formrow label.wide { flex:3; min-width:240px; }
+.formrow input, .formrow select { display:block; width:100%; padding:12px; margin-top:6px; color:var(--text); background:var(--bg); border:1px solid var(--line-2); border-radius:8px; font:inherit; }
+#reviewPanel { padding:18px; margin-top:18px; border:1px solid var(--accent); border-radius:12px; overflow-wrap:anywhere; }
+#nextAction { padding:12px 0; color:var(--accent); font-weight:600; }
+#compose h3 { margin-top:24px; }
 </style>
 </head>
 <body>
 <header>
   <div class="brand">
     <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#f7931a"/><g stroke="#1b0f00" stroke-width="2.4" stroke-linecap="round"><path d="M16 7.5v17M8.6 11.75l14.8 8.5M8.6 20.25l14.8-8.5"/><path d="M13.5 8.8 16 11.3l2.5-2.5M13.5 23.2 16 20.7l2.5 2.5" stroke-width="1.8"/></g></svg>
-    <div><h1>BlackIce</h1><p>Distributed FROST Silent Payments · coordinated over Marmot</p></div>
+    <div><h1>BlackIce</h1><p>Private payments. Shared approval. · Signet</p></div>
   </div>
   <div class="chips" id="chips"></div>
 </header>
 
 <main>
   <div class="col">
+    <div class="card" id="setup"><h2>Your wallet, ready to send</h2><p>Set up or restore your wallet in Frostsnap once. Then close Frostsnap and connect your device here.</p><div id="nextAction" role="status">Connecting to BlackIce…</div></div>
+    <div class="card" id="compose" hidden>
+      <h2>Send a payment</h2><p class="muted">Add recipients, select your coins, and review before asking the other signers to approve.</p>
+      <form id="paymentForm">
+        <h3>Recipients</h3><div id="recipientRows"></div>
+        <button class="btn" type="button" id="addRecipient">Add recipient</button>
+        <h3>Coins to spend</h3><p class="muted">Choose confirmed coins belonging to this Frostsnap wallet. Find their transaction IDs and output numbers in your wallet or explorer.</p>
+        <div id="inputRows"></div><button class="btn" type="button" id="addInput">Add coin</button>
+        <div class="formrow"><label>Transaction fee (sats)<input id="fee" type="number" min="1" step="1" value="300" required></label><label>Change address index<input id="changeIndex" type="number" min="0" step="1" value="1" required></label></div>
+        <p class="muted">Unused sats return to this wallet. You and the other signers review the payment on your devices.</p>
+        <button class="btn primary" type="submit" id="reviewButton">Review payment</button>
+        <div id="formError" class="err" role="alert"></div>
+        <div id="reviewPanel" hidden></div>
+      </form>
+    </div>
     <div class="card" id="payment"></div>
-    <div class="card rail"><h2>Signing ceremony</h2><div class="steps" id="steps"></div></div>
+    <div class="card rail"><h2>Payment progress</h2><div class="steps" id="steps"></div></div>
     <div class="devices" id="devices"></div>
     <div id="banner"></div>
     <div id="tx"></div>
     <div class="card controls" id="controls" hidden></div>
+    <button class="btn" id="advancedToggle" type="button">Show advanced details</button>
   </div>
-  <div class="card relay">
+  <div class="card relay" id="advancedPanel" hidden>
     <div class="head">
       <h2>What the relays see</h2>
       <p>Every Nostr event this Mac sent or received, as stored on the relays.</p>
@@ -234,9 +265,9 @@ let S = null, wireCount = 0, wireBytes = 0, leaks = 0, lastWire = 0;
 
 const STAGES = [
   { key: "proposed", t: "Proposed", s: "transaction built" },
-  { key: "ecdh", t: "ECDH approved", s: "each device, + DLEQ proof" },
-  { key: "derive", t: "Output derived", s: "both get the same tx" },
-  { key: "sign", t: "Signed", s: "each device approves" },
+  { key: "ecdh", t: "First approval", s: "approve on each device" },
+  { key: "derive", t: "Ready to sign", s: "review payment details" },
+  { key: "sign", t: "Signed", s: "approve on each device" },
   { key: "done", t: "Signed tx", s: "ready to broadcast" },
 ];
 function stageIndex(st) {
@@ -257,7 +288,7 @@ function renderChips() {
 function renderPayment() {
   const s = S.session;
   if (!s) {
-    $("payment").innerHTML = `<div class="idle">${ICON.lock}<span>Waiting for a proposal from the coordinator…</span></div>`;
+    $("payment").innerHTML = `<div class="idle">${ICON.lock}<span>Your payment summary will appear here when approval starts.</span></div>`;
     return;
   }
   const total = s.recipients.reduce((a, x) => a + x.amount_sat, 0);
@@ -306,9 +337,9 @@ function renderDevices() {
         ${m.me ? '<span class="tag">THIS MAC</span>' : m.coordinator ? '<span class="tag" style="background:rgba(149,154,163,.14);color:var(--muted)">COORDINATOR</span>' : ""}
       </header>
       <div class="rows">
-        ${row(p.ecdh, "ECDH share", "x·B_scan + BIP374 DLEQ proof", ecdhVal)}
-        ${row(derState, "Payment output derived", "proofs verified, SP script computed", derVal)}
-        ${row(p.sign === "approve" && !p.derived ? "idle" : p.sign, "FROST signature share", "after checking output on device", signVal)}
+        ${row(p.ecdh, "First device approval", "prepare private payment details", ecdhVal)}
+        ${row(derState, "Payment checked", "both signers must agree", derVal)}
+        ${row(p.sign === "approve" && !p.derived ? "idle" : p.sign, "Transaction approval", "review and sign on the device", signVal)}
       </div></div>`;
   }).join("");
 }
@@ -321,7 +352,7 @@ function renderBanner() {
     const hash = Object.values(s.per).find((p) => p.derived)?.derived;
     h = `<div class="banner ok">✓ Both devices independently derived the identical transaction<span class="mono">${short(hash, 12, 0)}</span></div>`;
   } else if (s?.derivedMatch === false) h = `<div class="banner bad">✗ Devices derived DIFFERENT transactions — signature shares withheld</div>`;
-  else if (s?.stage === "gate") h = `<div class="banner wait">✓ Both devices approved ECDH and sent their DLEQ proofs — ${S.isCoordinator ? "press <b>Request signatures</b> to continue" : "waiting for the coordinator to request signatures"}</div>`;
+  else if (s?.stage === "gate") h = `<div class="banner wait">✓ Both devices approved ECDH and sent their DLEQ proofs — ${S.isCoordinator ? "press <b>Continue to device signing</b>" : "waiting for the coordinator to request signatures"}</div>`;
   $("banner").innerHTML = h;
 }
 
@@ -354,18 +385,13 @@ function renderControls() {
   el.hidden = false;
   if (!el.dataset.built) {
     el.dataset.built = "1";
-    el.innerHTML = `<input id="pfile" value="proposal.json" spellcheck="false" aria-label="proposal file">
-      <button class="btn primary" id="bProp">Propose</button>
-      <button class="btn" id="bSign">Request signatures</button>
+    el.innerHTML = `<button class="btn" id="bSign">Continue to device signing</button>
       <button class="btn" id="bCancel">Cancel</button><span class="err" id="cerr"></span>`;
-    $("bProp").onclick = () => act("propose", { file: $("pfile").value });
     $("bSign").onclick = () => act("sign");
     $("bCancel").onclick = () => act("cancel");
   }
-  $("bProp").disabled = !S.canPropose;
   $("bSign").disabled = !S.canSign;
   $("bSign").className = "btn" + (S.canSign ? " primary" : "");
-  $("bProp").className = "btn" + (S.canPropose ? " primary" : "");
   $("bCancel").disabled = !S.session || !!S.session.complete || !!S.session.cancelled;
 }
 
@@ -384,8 +410,72 @@ async function act(name, body) {
 
 function render() {
   if (!S) return;
-  renderChips(); renderPayment(); renderSteps(); renderDevices(); renderBanner(); renderTx(); renderControls();
+  renderSimple(); renderChips(); renderPayment(); renderSteps(); renderDevices(); renderBanner(); renderTx(); renderControls();
 }
+
+let reviewedDraft = null;
+function invalidateReview() { reviewedDraft = null; $("reviewPanel").hidden = true; }
+function addRecipient() {
+  const row = document.createElement("div"); row.className = "formrow recipient";
+  row.innerHTML = `<label class="wide">Silent-payment address<input name="address" placeholder="tsp1…" required spellcheck="false"></label><label>Amount (sats)<input name="amount" type="number" min="330" step="1" required></label><button class="btn" type="button" aria-label="Remove recipient">Remove</button>`;
+  row.querySelector("button").onclick = () => { row.remove(); invalidateReview(); };
+  $("recipientRows").appendChild(row); invalidateReview();
+}
+function addInput() {
+  const row = document.createElement("div"); row.className = "formrow coin";
+  row.innerHTML = `<label class="wide">Funding transaction ID<input name="txid" required pattern="[a-fA-F0-9]{64}" spellcheck="false"></label><label>Output number<input name="vout" type="number" min="0" step="1" value="0" required></label><label>Address index<input name="index" type="number" min="0" step="1" value="0" required></label><label>Address type<select name="internal"><option value="false">Receive</option><option value="true">Change</option></select></label><button class="btn" type="button" aria-label="Remove coin">Remove</button>`;
+  row.querySelector("button").onclick = () => { row.remove(); invalidateReview(); };
+  $("inputRows").appendChild(row); invalidateReview();
+}
+function readDraft() {
+  return {
+    recipients: [...document.querySelectorAll(".recipient")].map(r => ({address:r.querySelector('[name="address"]').value.trim(),amount_sat:Number(r.querySelector('[name="amount"]').value)})),
+    inputs: [...document.querySelectorAll(".coin")].map(r => ({txid:r.querySelector('[name="txid"]').value.trim(),vout:Number(r.querySelector('[name="vout"]').value),index:Number(r.querySelector('[name="index"]').value),internal:r.querySelector('[name="internal"]').value === "true"})),
+    fee_sat:Number($("fee").value), change_index:Number($("changeIndex").value)
+  };
+}
+function renderSimple() {
+  $("compose").hidden = !S.isCoordinator || !S.canPropose;
+  const stage = S.session?.stage;
+  const text = !S.deviceReady ? "Connect your Frostsnap device. Keep the Frostsnap app closed." :
+    !S.group ? "Connecting to the signing group…" :
+    stage === "complete" ? "Signed. Export the transaction or broadcast it to Signet below." :
+    stage === "ecdh" ? "First approval: follow the prompt on each signer’s device." :
+    stage === "gate" ? (S.isCoordinator ? "Both first approvals arrived. Continue to device signing below." : "Waiting for the coordinator to continue.") :
+    ["deriving","signing","combining"].includes(stage) ? "Review and approve the transaction on each device." :
+    S.isCoordinator ? "Device connected. Prepare a payment when your other signers are ready." : "Device connected. Waiting for a payment from the coordinator.";
+  $("nextAction").textContent = text;
+  $("reviewButton").disabled = !S.deviceReady || !S.canPropose;
+}
+function setupComposer() {
+  $("addRecipient").onclick = addRecipient; $("addInput").onclick = addInput;
+  $("paymentForm").addEventListener("input", invalidateReview);
+  $("paymentForm").onsubmit = async e => {
+    e.preventDefault(); invalidateReview(); $("formError").textContent = "";
+    const draft = readDraft(); $("reviewButton").disabled = true;
+    const result = await api("review", draft);
+    renderSimple();
+    if (!result.ok) { $("formError").textContent = result.error; return; }
+    if (JSON.stringify(draft) !== JSON.stringify(readDraft())) { $("formError").textContent = "Payment changed during review. Review again."; return; }
+    reviewedDraft = draft;
+    const t = result.totals;
+    $("reviewPanel").innerHTML = `<h3>Review payment</h3>${draft.recipients.map(r => `<p><b>${sat(r.amount_sat)} sats</b> → ${esc(r.address)}</p>`).join("")}<p>Selected coins: ${sat(t.input_sat)} sats · Fee: ${sat(t.fee_sat)} sats · Change: ${sat(t.change_sat)} sats</p><button type="button" class="btn primary" id="startPayment">Ask signers to approve</button><p class="muted">Nothing is broadcast until you choose Broadcast to Signet.</p>`;
+    $("reviewPanel").hidden = false;
+    $("startPayment").onclick = async () => {
+      if (!reviewedDraft) return;
+      $("startPayment").disabled = true;
+      const result = await api("payment", reviewedDraft);
+      if (!result.ok) { $("formError").textContent = result.error; $("startPayment").disabled = false; }
+      else invalidateReview();
+    };
+  };
+  $("advancedToggle").onclick = () => {
+    $("advancedPanel").hidden = !$("advancedPanel").hidden;
+    $("advancedToggle").textContent = $("advancedPanel").hidden ? "Show advanced details" : "Hide advanced details";
+  };
+  addRecipient(); addInput();
+}
+setupComposer();
 
 const KIND = { 445: "group message", 1059: "gift-wrapped invite", 30443: "key package", 10051: "key package relays" };
 function addWire(w) {
